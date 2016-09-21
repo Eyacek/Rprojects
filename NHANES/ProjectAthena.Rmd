@@ -1,0 +1,84 @@
+---
+title: "Project Athena"
+author: "Evan Yacek"
+date: "Thursday, July 07, 2016"
+output: html_document
+---
+
+The datasets imported below have already been filtered through SAS. NHANESOCP1999-2003 were filtered based on ICODE = 5 representing teachers. NHANES1999-2003 datasets will be merged with blood pressure, body measure, cholesterol, and triglyercerides information for comparison. However, nutritional questions found in NHANES2005-09 were not present, so comparison to those is not advised. NHANES2005-09 were filtered using both the I-code = 15 and O-code = 8 listed in NHANES occupation code appendix. The 15 represents the Educational industry and the 8 represents Education, Training,and Library Occupations. Unfortunately filtering specifically for teachers between 2005-2009 is not possible without access to restricted datasets. The occupation codes needed to filter specifically for teachers are considered confidential and available only through the National Center for Health Statistics Research Data Center(RDC). In order to obtain datasets from the RDC a written proposal must be approved and various fees recieved. 
+
+```{r}
+###import data sets
+NHANESOCP2001 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESOCP2001.csv")
+NHANESOCP1999 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESOCP1999.csv")
+NHANESOCP2003 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESOCP2003.csv")
+NHANESOCP2005 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESOCP2005.csv")
+NHANESOCP2007 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESOCP2007.csv")
+NHANESOCP2009 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESOCP2009.csv")
+NHANESDIET2005 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESDIET2005.csv")
+NHANESDIET2007 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESDIET2007.csv")
+NHANESDIET2009 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESDIET2009.csv")
+NHANESCONSUMER2007 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESCONSUMER2007.csv")
+NHANESCONSUMER2009 <- read.csv("C:/Users/ye351_000/Desktop/OccupationData/NHANESCONSUMER2009.csv")
+
+
+```
+
+Merge Datasets 
+
+```{r}
+
+MERGEDNHANES2005DATA <- merge(NHANESOCP2005, NHANESDIET2005)
+MERGEDNHANES2007DATA <- merge(NHANESCONSUMER2007, NHANESOCP2007)
+MERGEDNHANES2007DATA <- merge(MERGEDNHANES2007DATA, NHANESDIET2007)
+MERGEDNHANES2009DATA <- merge(NHANESOCP2009, NHANESDIET2009)
+MERGEDNHANES2009DATA <- merge(MERGEDNHANES2009DATA, NHANESCONSUMER2009)
+
+head(MERGEDNHANES2005DATA)
+library(nhanesA)
+
+browseNHANES(2009, 'EXAM') ####Directly downloads XPT files from NHANES 
+auger <- nhanes('OCQ_G')
+
+```
+
+NOTE NHANES2005 DIETARY DATA NOT COMPARABLE TO OTHER YEARS(DIFFERENT QUESTIONS)
+LABARATORY NUTRIONAL DATA CAN BE COMPARED TO LATER YEARS(BP,BMI,CHOL,VIT D)
+APOLIPOPROTEIN B IS FOUND IN CHOL DATA/FOR LATER YEARS IT IS in SEPERATE DATASET.
+
+BP was taken from four readings, previously they were averaged into one reading, however this must be done for 2005 data
+..........................................................................................................
+COLUMN CODES Merged 2005 Data
+
+DBQ700: How Healthy is your diet? 
+(1:Excellent, 2:Very Good, 3:Good, 4:Fair,5:Poor,6:Refused,7:IDK)
+
+DBQ197: How much milk product consumed in last 30 days? 
+(0:Never, 1:Rarely-less than once a week, 2:Sometimes-once a week or more, but less than once a day,3:Often-once a day or more?,4:Varied, 7:Refused, 9:Don't know)
+
+DBQ229: Ignore(another milk consumption quesion)
+
+DBD091: # of meals a week not eaten at home
+(1 to 21:Range of Values,	0:Never, 5555:More than 21 times per week)
+
+DBQ720: Have you heard of Dietary guidlines? 
+(1:yes, 2:no , 7:refused, 9:dont know )
+
+DBQ730: Have you heard of the food guide pyramid?
+(1:yes, 2:no , 7:refused, 9:dont know )
+
+DBQ740: Have you heard of the 5 a day program?
+(1:yes, 2:no , 7:refused, 9:dont know )
+
+DBQ750: Do you use nutrion facts on food labels?
+(1:yes, 2:no , 7:refused, 9:dont know )
+
+DBQ760: Do you use the ingredients list on food labels?
+(1:yes, 2:no , 7:refused, 9:dont know )
+
+DBQ770: Do you use the serving size info on food labels?
+(1:yes, 2:no , 7:refused, 9:dont know )
+
+...........................................................................................................
+
+

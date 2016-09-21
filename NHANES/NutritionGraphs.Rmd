@@ -1,0 +1,347 @@
+---
+title: "Nutrient Intake Report"
+author: "Evan Yacek"
+date: "Friday, August 19, 2016"
+output: html_document
+---
+
+
+
+
+
+```{r}
+#load libraries needed for analysis
+library(KernSmooth)
+library(png)
+library(wesanderson)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(plyr)
+library(dplyr)
+library(nhanesA)
+library(foreign) 
+library(survey)  # load survey package (analyzes complex design surveys)
+
+food2007 <- nhanes("DR1TOT_E")
+demo2007 <- nhanes("DEMO_E")
+food2009 <- nhanes("DR1TOT_F")
+demo2009 <- nhanes("DEMO_F")
+OCP_E2007 <- nhanes('OCQ_E')
+OCP_F2009 <- nhanes('OCQ_F')
+
+
+popage<-c(55901,77670,72816,45364)  #Census numbers of which to standardize age
+
+# set R to produce conservative standard errors instead of crashing
+# http://r-survey.r-forge.r-project.org/survey/exmample-lonely.html
+options( survey.lonely.psu = "adjust" )
+# this setting matches the MISSUNIT option in SUDAAN
+DemoKeepVars <-
+  c( 
+    "SEQN" ,     # unique person identifier (merge variable)
+    
+    "WTMEC2YR" ,   # the two-year mobile examination center weight
+    # note that this is the weight for only analyses that require MEC variables
+    "WTINT2YR",
+    # if none of the variables used in the analysis were from
+    # individuals who took the mobile examination center (MEC) exam,
+    # then the two-year interview weight (WTINT2YR) should be used instead
+    
+    # also note: for pooled data, divide this weight by the number of data sets pooled
+    # in order to approximate the us civilian non-institutionalized population for the time period
+    
+    "RIDSTATR" ,  # interviewed only or interviewed + MEC
+    
+    "SDMVPSU" ,   # primary sampling unit varaible, used in complex design
+    
+    "SDMVSTRA" ,   # strata variable, used in complex design
+    
+    "RIDRETH1" ,	# person race / ethnicity
+    
+    "RIDAGEYR" ,	# person age
+    
+    "RIAGENDR" 		# gender
+  )
+
+foodKeepVars<-
+  c(
+    "SEQN","WTDRD1","DR1DRSTZ","DRDINT","DR1TKCAL","DR1TPROT", "DR1TCARB",
+    "DR1TSUGR", "DR1TTFAT","DR1TSFAT", "DR1TCHOL", "DR1TCALC", "DR1TPOTA",
+    "DR1TSODI", "DR1TALCO"
+    
+    )
+OCPKeepVars <- 
+  c( 
+    "SEQN" ,     # unique person identifier (merge variable)
+    
+    "OCD231",    # industry group code
+    
+    "OCD241"     # occupation group code
+  )
+
+
+demo2009 <- demo2009[ , DemoKeepVars ]
+food2009 <- food2009[, foodKeepVars]
+food2007 <- food2007[, foodKeepVars]
+demo2007 <- demo2007[ , DemoKeepVars ]
+OCP_E2007 <-  OCP_E2007[, OCPKeepVars]
+OCP_F2009 <-  OCP_F2009[, OCPKeepVars]
+
+myData <- merge(demo2009, food2009)
+myData <- merge(myData, OCP_F2009)
+myData2 <- merge(demo2007, food2007)
+myData2 <- merge(myData2, OCP_E2007)
+
+finalData <- rbind(myData, myData2)
+
+finalData <- subset(finalData, DR1DRSTZ %in% 1) 
+finalData<-transform(finalData, race=c( 3 , 3 , 1 , 2 , 4 )[RIDRETH1]) #Recode Race
+
+# recode the RIDRETH1 variable as:
+    # mexican american and other hispanic -> 3
+    # non-hispanic white -> 1
+    # non-hispanic black -> 2
+    # other race including multi-racial -> 4
+
+finalData$weightedTotal <- 1    #Add column for easy weighted sum
+finalData<-transform(finalData, agecat=cut(RIDAGEYR,c(0,19,39,59, Inf))) #Create categorized age column
+finalData$WTDRD14 <- finalData$WTDRD1 / 2
+
+
+
+nutriDesign<- svydesign(id=~SDMVPSU,strata=~SDMVSTRA,nest=TRUE,weights=~WTDRD14,data=finalData)
+
+
+
+
+racegenderN<-as.data.frame(svytable(~race+RIAGENDR,nutriDesign))
+racegenderageN<-expand.grid(race=1:4,RIAGENDR=1:2,agecat=levels(finalData$agecat))
+racegenderageN$Freq<- as.vector(outer(racegenderN$Freq, popage/sum(popage)))
+
+
+finalData<-subset(finalData, !is.na(DR1TKCAL) )
+#Build new design off this subset
+
+finalDesign <- svydesign(id=~SDMVPSU,strata=~SDMVSTRA,nest=TRUE,weights=~WTDRD14,data=finalData)
+
+
+#CALORIES BY GENDER
+cal <- svyby(~DR1TKCAL,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+cal$test <- "Overall N = 11,182"
+cal$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachcal <- svyby(~DR1TKCAL,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachcal$test <- "Teachers N = 263"
+teachcal$RIAGENDR <- c("Male", "Female")
+
+calCombine <- rbind(cal,teachcal)
+
+ggplot(calCombine, aes(factor(RIAGENDR), DR1TKCAL, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = "NHANES 1 day Calorie intake", y = "kcal")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TKCAL , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+
+prot <- svyby(~DR1TPROT,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+prot$test <- "Overall N = 11,182"
+prot$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachProt <- svyby(~DR1TPROT,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachProt$test <- "Teachers N = 263"
+teachProt$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+protCombine <- rbind(prot,teachProt)
+
+ggplot(protCombine, aes(factor(RIAGENDR), DR1TPROT, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = "NHANES 1 day Protein intake", y = "gm")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TPROT , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+
+carb <- svyby(~DR1TCARB,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+carb$test <- "Overall N = 11,182"
+carb$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+
+teachCarb <-svyby(~DR1TCARB,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachCarb$test <- "Teachers N = 263"
+teachCarb$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+carbCombine <- rbind(carb,teachCarb)
+
+ggplot(carbCombine, aes(factor(RIAGENDR), DR1TCARB, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = "NHANES 1 day Carbohydrate intake", y = "gm")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TCARB , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+
+
+
+
+
+suger <-svyby(~DR1TSUGR,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+suger$test <- "Overall N = 11,182"
+suger$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachSuger <- svyby(~DR1TSUGR,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachSuger$test <- "Teachers N = 263"
+teachSuger$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+sugerCombine <- rbind(suger,teachSuger)
+
+ggplot(sugerCombine, aes(factor(RIAGENDR), DR1TSUGR, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = "NHANES 1 day Suger intake", y = "gm")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TSUGR , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+fat <- svyby(~DR1TTFAT,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+fat$test <- "Overall N = 11,182"
+fat$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachFat <- svyby(~DR1TTFAT,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachFat$test <- "Teachers N = 263"
+teachFat$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+fatCombine <- rbind(fat,teachFat)
+
+ggplot(fatCombine, aes(factor(RIAGENDR), DR1TTFAT, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = "NHANES 1 day Total Fat intake", y = "gm")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TTFAT , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+satfat<- svyby(~DR1TSFAT,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+satfat$test <- "Overall N = 11,182"
+satfat$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachSatfat <- svyby(~DR1TSFAT,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachSatfat$test <- "Teachers N = 263"
+teachSatfat$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+satfatCombine <- rbind(satfat,teachSatfat)
+
+ggplot(satfatCombine, aes(factor(RIAGENDR), DR1TSFAT, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = " NHANES 1 day Total Saturated Fat intake", y = "gm")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TSFAT , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+nchol <- svyby(~DR1TCHOL,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+nchol$test <- "Overall N = 11,182"
+nchol$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachNchol <- svyby(~DR1TCHOL,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachNchol$test <- "Teachers N = 263"
+teachNchol$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+ncholCombine <- rbind(nchol,teachNchol)
+
+ggplot(ncholCombine, aes(factor(RIAGENDR), DR1TCHOL, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = " NHANES 1 day Total Cholesterol intake", y = "mg")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TCHOL , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+
+
+
+
+
+
+calc <- svyby(~DR1TCALC,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+calc$test <- "Overall N = 11,182"
+calc$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+teachCalc <- svyby(~DR1TCALC,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachCalc$test <- "Teachers N = 263"
+teachCalc$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+calcCombine <- rbind(calc,teachCalc)
+
+ggplot(calcCombine, aes(factor(RIAGENDR), DR1TCALC, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = " NHANES 1 day Total Potassium intake", y = "mg")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TCALC , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+pot <- svyby(~DR1TPOTA,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+pot$test <- "Overall N = 11,182"
+pot$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+teachPot <- svyby(~DR1TPOTA,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachPot$test <- "Teachers N = 263"
+teachPot$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+potCombine <- rbind(pot,teachPot)
+
+ggplot(potCombine, aes(factor(RIAGENDR),DR1TPOTA, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = " NHANES 1 day Total Calcium intake", y = "mg")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TPOTA , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+sod <- svyby(~DR1TSODI,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+sod$test <- "Overall N = 11,182"
+sod$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+teachSod <- svyby(~DR1TSODI,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachSod$test <- "Teachers N = 263"
+teachSod$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+sodCombine <- rbind(sod,teachSod)
+
+ggplot(sodCombine, aes(factor(RIAGENDR),DR1TSODI, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = " NHANES 1 day Total Sodium intake", y = "mg")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TSODI , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+alc <- svyby(~DR1TALCO,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+alc$test <- "Overall N = 11,182"
+alc$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+teachAlc <- svyby(~DR1TALCO,~RIAGENDR,design=subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8),svymean,na.rm=TRUE,vartype = c("se", "ci"))
+teachAlc$test <- "Teachers N = 263"
+teachAlc$RIAGENDR <- c("Male", "Female")
+positions <- c("Male", "Female")
+
+alcCombine <- rbind(alc,teachAlc)
+
+ggplot(alcCombine, aes(factor(RIAGENDR),DR1TALCO, fill = test, width = 0.75 )) + 
+  geom_bar(width=1 , stat="identity", position = "dodge"  ) +labs(title = " NHANES 1 day Total Alcohol intake", y = "gm")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(DR1TALCO , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Zissou"))+geom_errorbar(aes(ymin=ci_l, ymax=ci_u), width=.2,
+                 position=position_dodge(.75), colour = "red")
+
+
+svyplot(DR1TKCAL~RIDAGEYR, design = subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 )  ,  basecol = function(d) c("purple","orange")[as.numeric(d$RIAGENDR)], style="bubble",pch=19,alpha=c(0,1), xlab = "Age",ylab = "Total Calories")
+legend("topleft",col=c("purple","orange"), pch=19, legend=c("Male","Female"))
+linet <- svysmooth(DR1TKCAL~RIDAGEYR,subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & RIAGENDR == 1 ))
+linet2 <- svysmooth(DR1TKCAL~RIDAGEYR,subset(postStratify(finalDesign,~race+RIAGENDR+agecat,racegenderageN),RIDAGEYR>=20 & RIAGENDR == 2 ))
+
+lines(linet, col="purple", lwd = 3)
+lines(linet2, col="orange", lwd = 3)
+
+
+```
+
+
+
+```{r, echo=FALSE}
+
+
+
+
+
+
+```
+
+

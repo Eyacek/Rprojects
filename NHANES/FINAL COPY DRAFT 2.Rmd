@@ -1,0 +1,569 @@
+---
+title: "FirstAttempt"
+author: "Evan Yacek"
+date: "Friday, August 05, 2016"
+output: html_document
+---
+
+
+```{r , echo=FALSE , include=FALSE}
+
+#ATTEMPT AT CREATING WIEGHTED NHANES DATASET
+library(wesanderson)
+library(knitr)
+library(ggplot2)
+library(tidyr)
+library(plyr)
+library(dplyr)
+library(nhanesA)
+library(foreign) # load foreign package (converts data files into R)
+library(survey)  # load survey package (analyzes complex design surveys)
+opts_chunk$set(out.width='750px', dpi=200)
+#Upload datasets
+
+OCP_E2007 <- nhanes('OCQ_E')
+OCP_F2009 <- nhanes('OCQ_F')
+DEMO2007 <- nhanes('DEMO_E')
+DEMO2009 <- nhanes('DEMO_F')
+Diet2007 <- nhanes('DBQ_E')
+Diet2009 <- nhanes('DBQ_F')
+cons2007 <- nhanes('CBQ_E')
+cons2009 <- nhanes('CBQ_F')
+bodyMeasure2007 <- nhanes('BMX_E')
+bodyMeasure2009 <- nhanes('BMX_F')
+bp2007 <- nhanes('BPX_E')
+bp2009 <- nhanes('BPX_F')
+chol2007 <- nhanes('TCHOL_E')
+chol2009 <- nhanes('TCHOL_F')
+health2007 <- nhanes('HSQ_E')
+health2009 <- nhanes('HSQ_F')
+
+
+popage<-c(55901,77670,72816,45364)
+
+# set R to produce conservative standard errors instead of crashing
+# http://r-survey.r-forge.r-project.org/survey/exmample-lonely.html
+options( survey.lonely.psu = "adjust" )
+# this setting matches the MISSUNIT option in SUDAAN
+DemoKeepVars <-
+  c( 
+    "SEQN" ,     # unique person identifier (merge variable)
+    
+    "WTMEC2YR" ,   # the two-year mobile examination center weight
+    # note that this is the weight for only analyses that require MEC variables
+    "WTINT2YR",
+    # if none of the variables used in the analysis were from
+    # individuals who took the mobile examination center (MEC) exam,
+    # then the two-year interview weight (WTINT2YR) should be used instead
+    
+    # also note: for pooled data, divide this weight by the number of data sets pooled
+    # in order to approximate the us civilian non-institutionalized population for the time period
+    
+    "RIDSTATR" ,  # interviewed only or interviewed + MEC
+    
+    "SDMVPSU" ,   # primary sampling unit varaible, used in complex design
+    
+    "SDMVSTRA" , 	# strata variable, used in complex design
+    
+    "RIDRETH1" ,	# person race / ethnicity
+    
+    "RIDAGEYR" ,	# person age
+    
+    "RIAGENDR" 		# gender
+  )
+
+TCHOLKeepVars <-
+  c( 
+    "SEQN" ,   	# unique person identifier (merge variable)
+    
+    "LBXTC" 		# laboratory total cholesterol variable, from
+    # http://www.cdc.gov/nchs/nhanes/nhanes2009-2010/TCHOL_F.htm#LBXTC
+  )
+
+OCPKeepVars <- 
+  c( 
+    "SEQN" ,     # unique person identifier (merge variable)
+    
+    "OCD231", 	 # industry group code
+    
+    "OCD241"     # occupation group code
+  )
+
+DietKeepVars <- 
+  c(
+    "SEQN" ,  # identifier
+    "DBQ700", # How Healthy is your diet?
+    "DBD895", # Number of meals not prepared at home?(7 days)
+    "DBD900", # Number of meals from fast food place?(7 days)
+    "DBQ930"  # Are you the main meal planner/prepper?
+    
+    
+    )
+
+ConKeepVars <- c(
+  "SEQN",
+  "CBQ020", #Fruits available in home
+  "CBQ030", #Vegetables
+  "CBQ040", #Salty Snacks
+  "CBQ050", #Fat free or low fat milk
+  "CBQ060" , #Soft drinks
+  "CBD160" # NUmber of times someone cooked dinner at home
+  
+  
+  )
+
+healthKeepVars <- c("SEQN","HSD010") #Rate your general health 
+
+#Keep only variables of interest
+                    
+health2007 <- health2007[, healthKeepVars] 
+health2009 <- health2009[, healthKeepVars]
+DEMO2009 <- DEMO2009[ , DemoKeepVars ]
+chol2009 <- chol2009[ , TCHOLKeepVars ]
+DEMO2007 <- DEMO2007[ , DemoKeepVars ]
+chol2007 <- chol2007[ , TCHOLKeepVars ]
+OCP_E2007 <-  OCP_E2007[, OCPKeepVars]
+OCP_F2009 <-  OCP_F2009[, OCPKeepVars]
+Diet2007 <- Diet2007[, DietKeepVars]
+Diet2009 <- Diet2009[, DietKeepVars]
+cons2009 <- cons2009[, ConKeepVars]
+cons2007 <- cons2007[, ConKeepVars]
+
+
+
+```
+
+
+```{r}
+
+
+waistKeepVars <- c(
+  "SEQN",
+  "BMXWAIST" )
+bodyMeasure2007 <- bodyMeasure2007[, waistKeepVars]
+waistData <- merge(DEMO2007, bodyMeasure2007)
+waistData <- subset(waistData, RIDSTATR %in% 2)
+waistData<-transform(waistData, race=c( 3 , 3 , 1 , 2 , 4 )[RIDRETH1])
+waistData$weightedTotal <- 1
+# recode the RIDRETH1 variable as:
+    # mexican american and other hispanic -> 3
+    # non-hispanic white -> 1
+    # non-hispanic black -> 2
+    # other race including multi-racial -> 4
+    
+waistData<-transform(waistData, agecat=cut(RIDAGEYR,c(0,19,39,59, Inf)))
+designC <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTMEC2YR,data=waistData)
+racegender3<-as.data.frame(svytable(~race+RIAGENDR,designC))
+racegenderage3<-expand.grid(race=1:4,RIAGENDR=1:2,agecat=levels(waistData$agecat))
+racegenderage3$Freq<- as.vector(outer(racegender3$Freq, popage/sum(popage)))
+somedata5<-subset(waistData, !is.na(BMXWAIST) )
+design5 <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTMEC2YR,data=somedata5)
+#AVERAGE WAIST CIRCUMFERENCE BY RACE AND GENDER
+svyby(~BMXWAIST,~race+RIAGENDR,design=subset(postStratify(design5,~race+RIAGENDR+agecat,racegenderage3),RIDAGEYR>=20),svymean,na.rm=TRUE)
+svyplot(BMXWAIST~RIDAGEYR, design = subset(postStratify(design5,~race+RIAGENDR+agecat,racegenderage3),RIDAGEYR>=20)  , style = "bubble")
+
+
+
+
+#MERGE data sets
+NHANES2007DATA<-merge(DEMO2007,chol2007 , All = TRUE)
+NHANES2007DATA<-merge(NHANES2007DATA,Diet2007, All = TRUE)
+NHANES2007DATA<-merge(NHANES2007DATA,cons2007, All = TRUE)
+NHANES2007DATA<-merge(NHANES2007DATA,OCP_E2007, All = TRUE)
+NHANES2007DATA<-merge(NHANES2007DATA,health2007, All = TRUE)
+
+
+NHANES2009DATA<-merge(DEMO2009,chol2009, All = TRUE)
+NHANES2009DATA<-merge(NHANES2009DATA,Diet2009, All = TRUE)
+NHANES2009DATA<-merge(NHANES2009DATA,cons2009, All = TRUE)
+NHANES2009DATA<-merge(NHANES2009DATA,OCP_F2009, All = TRUE)
+NHANES2009DATA<-merge(NHANES2009DATA,health2009, All = TRUE)
+
+
+mergedSET <- rbind(NHANES2009DATA, NHANES2007DATA)
+
+mergedSET <-subset(mergedSET, RIDSTATR %in% 2 | RIDSTATR %in% 1)
+mergedSET<-transform(mergedSET,  HI_CHOL = ifelse(LBXTC>=240,1,0))
+mergedSET<-transform(mergedSET, race=c( 3 , 3 , 1 , 2 , 4 )[RIDRETH1])
+mergedSET$weightedTotal <- 1
+mergedSET$WTMEC4YR <- mergedSET$WTMEC2YR / 2
+mergedSET$WTINT4YR <- mergedSET$WTINT2YR / 2
+# recode the RIDRETH1 variable as:
+    # mexican american and other hispanic -> 3
+    # non-hispanic white -> 1
+    # non-hispanic black -> 2
+    # other race including multi-racial -> 4 
+mergedSET<-transform(mergedSET, agecat=cut(RIDAGEYR,c(0,19,39,59, Inf)))
+
+
+mergedSET$CBQ020[mergedSET$CBQ020== 77] <- NA   #RECODE FOR DATA THAT CANT BE ANALYZED 
+mergedSET$CBQ020[mergedSET$CBQ020== 99] <- NA
+mergedSET$CBQ030[mergedSET$CBQ030== 77] <- NA    
+mergedSET$CBQ030[mergedSET$CBQ030== 99] <- NA
+mergedSET$CBQ040[mergedSET$CBQ040== 77] <- NA   
+mergedSET$CBQ040[mergedSET$CBQ040== 99] <- NA
+mergedSET$CBQ060[mergedSET$CBQ060== 77] <- NA   
+mergedSET$CBQ060[mergedSET$CBQ060== 99] <- NA
+mergedSET$DBQ700[mergedSET$DBQ700== 7] <- NA   
+mergedSET$DBQ700[mergedSET$DBQ700== 9] <- NA
+mergedSET$DBD895[mergedSET$DBD895== 5555] <- NA   
+mergedSET$DBD895[mergedSET$DBD895== 9999] <- NA
+mergedSET$HSD010[mergedSET$HSD010== 9] <- NA
+mergedSET$CBD160[mergedSET$CBD160 == 777] <- NA
+mergedSET$CBD160[mergedSET$CBD160 == 999] <- NA
+
+                   
+NHANES2009DATA<-subset(NHANES2009DATA, RIDSTATR %in% 2)
+NHANES2009DATA<-transform(NHANES2009DATA,  HI_CHOL = ifelse(LBXTC>=240,1,0))
+NHANES2009DATA<-transform(NHANES2009DATA, race=c( 3 , 3 , 1 , 2 , 4 )[RIDRETH1])
+NHANES2009DATA$weightedTotal <- 1
+# recode the RIDRETH1 variable as:
+    # mexican american and other hispanic -> 3
+    # non-hispanic white -> 1
+    # non-hispanic black -> 2
+    # other race including multi-racial -> 4
+    
+NHANES2009DATA<-transform(NHANES2009DATA, agecat=cut(RIDAGEYR,c(0,19,39,59, Inf)))
+```
+
+ALL RECODING DONE, BUILD MODELS
+
+```{r}
+
+designA <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTMEC2YR,data=NHANES2009DATA)
+
+designB <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTINT4YR,data=mergedSET)
+
+popage<-c(55901,77670,72816,45364)
+
+racegender<-as.data.frame(svytable(~race+RIAGENDR,designA))
+racegenderage<-expand.grid(race=1:4,RIAGENDR=1:2,agecat=levels(NHANES2009DATA$agecat))
+racegenderage$Freq<- as.vector(outer(racegender$Freq, popage/sum(popage)))
+
+racegender2<-as.data.frame(svytable(~race+RIAGENDR,designB))
+racegenderage2<-expand.grid(race=1:4,RIAGENDR=1:2,agecat=levels(mergedSET$agecat))
+racegenderage2$Freq<- as.vector(outer(racegender$Freq, popage/sum(popage)))
+
+
+####REPLACE AND REWEIGHT NA
+
+somedata<-subset(NHANES2009DATA, !is.na(LBXTC) )
+somedata2 <- subset(mergedSET, !is.na(DBQ700) & !is.na(DBD895) & !is.na(DBD900))
+somedata3 <- subset(mergedSET, !is.na(CBQ020) & !is.na(CBQ030) & !is.na(CBQ040) & !is.na(CBQ060) & !is.na(CBD160))
+somedata4 <- subset(mergedSET, !is.na(HSD010))
+
+
+design1 <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTMEC2YR,data=somedata)
+
+design2 <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTINT4YR,data=somedata2)
+
+design3 <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTINT4YR,data=somedata3)
+
+design4 <- svydesign(id=~SDMVPSU,
+strata=~SDMVSTRA,nest=TRUE,weights=~WTINT4YR,data=somedata4)
+
+
+cholEX <- svyby(~HI_CHOL,~race+RIAGENDR,design=subset(postStratify(design1,~race+RIAGENDR+agecat,racegenderage),RIDAGEYR>=20),svymean,na.rm=TRUE)
+cholEX$race <- c("White", "Black", "Hispanic", "Multi-Racial/Other", "White", "Black", "Hispanic", "Multi-Racial/Other")
+cholEX$RIAGENDR <- c("Male", "Male","Male","Male","Female","Female","Female","Female")
+cholEX$HI_CHOLP <- round(cholEX$HI_CHOL, 4)*100
+# recode the RIDRETH1 variable as:
+    # mexican american and other hispanic -> 3
+    # non-hispanic white -> 1
+    # non-hispanic black -> 2
+    # other race including multi-racial -> 4
+ggplot(cholEX, aes(x=RIAGENDR, y=HI_CHOL, fill=factor(race)))+
+  geom_bar(position="dodge", stat="identity") + geom_text(aes(label=HI_CHOLP), position=position_dodge(width=0.9), vjust=-0.25)
+#ABOVE CHART Corresponds to http://www.cdc.gov/nchs/data/databriefs/db92_fig1.png
+
+teachersD1 <- subset(postStratify(design1,~race+RIAGENDR+agecat,racegenderage),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8)
+teachersD2 <- subset(postStratify(design2,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8)
+teachersD3 <- subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8)
+teachersD4 <- subset(postStratify(design4,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20 & OCD231 == 15 & OCD241 == 8)
+
+
+
+#NOTE that this is 1 year data N = 134 for teachers
+teachcholEX <- svyby(~HI_CHOL,~RIAGENDR,design= teachersD1,svymean,na.rm=TRUE)
+teachcholEX
+
+cholCompare <- svyby(~HI_CHOL,~RIAGENDR,design= subset(postStratify(design1,~race+RIAGENDR+agecat,racegenderage),RIDAGEYR>=20),svymean,na.rm=TRUE)
+#Compared to NHANES2009
+cholCompare
+
+teachcholEX$RIAGENDR <- c("Male", "Female")
+teachcholEX$HI_CHOLP <- round(teachcholEX$HI_CHOL, 4)*100
+# recode the RIDRETH1 variable as:
+    # mexican american and other hispanic -> 3
+    # non-hispanic white -> 1
+    # non-hispanic black -> 2
+    # other race including multi-racial -> 4
+ggplot(teachcholEX, aes(x=RIAGENDR, y=HI_CHOL))+
+  geom_bar(position="dodge", stat="identity") + geom_text(aes(label=HI_CHOLP), position=position_dodge(width=0.9), vjust=-0.25)
+
+
+
+
+# Number of Meals not prepared at home N = 244
+teachMeanMeals <- svyby(~DBD895,~RIAGENDR,design= teachersD2,svymean,na.rm=TRUE)
+meanMeals <- svyby(~DBD895,~RIAGENDR,design= subset(postStratify(design2,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svymean,na.rm=TRUE)
+teachMeanMeals
+meanMeals
+
+svyhist(~RIDAGEYR, teachersD3, main="Teacher Weighted Age Distribution",col="orange")
+svyhist(~RIDAGEYR,subset(postStratify(design2,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20) , main="Weighted Age Distribution",col="orange")
+
+
+# Number of Meals from a fastfood place a week N = 244
+teachFastMeals <- svyby(~DBD900,~RIAGENDR,design= teachersD2,svymean,na.rm=TRUE)
+fastMeals <- svyby(~DBD900,~RIAGENDR,design= subset(postStratify(design2,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svymean,na.rm=TRUE)
+teachFastMeals
+fastMeals
+
+#Number of times someone cooked dinner at home N = 275
+teachDinMeals <- svyby(~CBD160, ~RIAGENDR, design = teachersD3, svymean, na.rm = TRUE)
+dinMeals <- svyby(~CBD160, ~RIAGENDR, design = subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20) , svymean, na.rm = TRUE)
+teachDinMeals
+dinMeals
+
+#HOW OFTEN IS FRUIT AVAILABLE(weighted teachers, weighted pop, unwtd teach ct), N = 275
+teachfruitQ <- svyby(~weightedTotal,~CBQ020,design= teachersD3,svytotal,na.rm=TRUE)
+teachfruitQ$FREQ <- (teachfruitQ$weightedTotal / sum(teachfruitQ$weightedTotal)) * 100
+
+fruitQ <- svyby(~weightedTotal,~CBQ020,design=subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svytotal,na.rm=TRUE)####MUST be older than 20
+fruitQ$FREQ <- (fruitQ$weightedTotal / sum(fruitQ$weightedTotal)) * 100
+
+svyby(~weightedTotal,~CBQ020,design=subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),unwtd.count,na.rm=TRUE)####MUST be older than 20 
+svyby(~weightedTotal,~CBQ020,design= teachersD3,unwtd.count,na.rm=TRUE)
+
+
+teachvegQ <- svyby(~weightedTotal,~CBQ030,design= teachersD3,svytotal,na.rm=TRUE)
+teachvegQ$FREQ <- (teachvegQ$weightedTotal / sum(teachvegQ$weightedTotal)) * 100
+
+vegQ <- svyby(~weightedTotal,~CBQ030,design=subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svytotal,na.rm=TRUE)####MUST be older than 20
+vegQ$FREQ <- (vegQ$weightedTotal / sum(vegQ$weightedTotal)) * 100
+
+teachsaltQ <- svyby(~weightedTotal,~CBQ040,design= teachersD3,svytotal,na.rm=TRUE)
+teachsaltQ$FREQ <- (teachsaltQ$weightedTotal / sum(teachsaltQ$weightedTotal)) * 100
+
+saltQ <- svyby(~weightedTotal,~CBQ040,design=subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svytotal,na.rm=TRUE)####MUST be older than 20
+saltQ$FREQ <- (saltQ$weightedTotal / sum(saltQ$weightedTotal)) * 100
+
+teachsoftQ <- svyby(~weightedTotal,~CBQ060,design= teachersD3,svytotal,na.rm=TRUE)
+teachsoftQ$FREQ <- (teachsoftQ$weightedTotal / sum(teachsoftQ$weightedTotal)) * 100
+
+softQ <- svyby(~weightedTotal,~CBQ060,design=subset(postStratify(design3,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svytotal,na.rm=TRUE)####MUST be older than 20
+softQ$FREQ <- (softQ$weightedTotal / sum(softQ$weightedTotal)) * 100
+
+teachDBQ <- svyby(~weightedTotal,~DBQ700,design= teachersD2,svytotal,na.rm=TRUE)
+teachDBQ$FREQ <- (teachDBQ$weightedTotal / sum(teachDBQ$weightedTotal)) * 100
+
+DBQ <- svyby(~weightedTotal,~DBQ700,design=subset(postStratify(design2,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svytotal,na.rm=TRUE)####MUST be older than 20
+DBQ$FREQ <- (DBQ$weightedTotal / sum(DBQ$weightedTotal)) * 100
+
+###N = 250 for gen health 
+teachGenHealth <- svyby(~weightedTotal,~HSD010,design= teachersD4,svytotal,na.rm=TRUE)
+teachGenHealth$FREQ <- (teachGenHealth$weightedTotal / sum(teachGenHealth$weightedTotal)) * 100
+
+genHealth <-svyby(~weightedTotal,~HSD010,design= subset(postStratify(design4,~race+RIAGENDR+agecat,racegenderage2),RIDAGEYR>=20),svytotal,na.rm=TRUE)
+genHealth$FREQ <- (genHealth$weightedTotal / sum(genHealth$weightedTotal)) * 100
+
+
+```
+
+
+
+```{r}
+
+
+fruitQ$CBQ020 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+fruitQ$test <- "Overall(N= 11, 638)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(fruitQ, aes(x=CBQ020, y = FREQ)) + geom_bar(stat="identity" , fill = "red")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ), vjust = -.5))+ labs(title = "How often do you have fruits \n in your home?(Total) N= 11,638", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+teachfruitQ$CBQ020 <- c("Always","Most of the \n Time", "Sometimes", "Rarely")
+teachfruitQ$test <- "Teachers(N= 275)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely")
+ggplot(teachfruitQ, aes(x=CBQ020, y = FREQ)) + geom_bar(stat="identity" , fill = "red")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ), vjust = -.5))+ labs(title = "How often do you have fruits \n in your home?(Total) N= 275", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+graphCombine5 <- rbind(fruitQ, teachfruitQ)
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(graphCombine5, aes(factor(CBQ020), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge", colour = "black") +labs(title = "How often do you have fruits \n in your home?", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=3, name="Royal1"))
+
+
+
+
+
+
+
+
+
+
+
+vegQ$CBQ030 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+vegQ$test <- "Overall(N = 11,638)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(vegQ, aes(x=CBQ030, y = FREQ)) + geom_bar(stat="identity" , fill = "dark green")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How often do you have dark green vegetables \n in your home?(Total) N= 11,638", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+teachvegQ$CBQ030 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+teachvegQ$test <- "Teachers(N = 275)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(teachvegQ, aes(x=CBQ030, y = FREQ)) + geom_bar(stat="identity" , fill = "dark green")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How often do you have dark green vegetables \n in your home?(Total) N= 275", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+
+graphCombine4 <- rbind(vegQ, teachvegQ)
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(graphCombine4, aes(factor(CBQ030), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge", colour = "black") +labs(title = "How often do you have dark green vegetables \n in your home?", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=3, name="Cavalcanti"))
+
+
+
+
+
+
+
+
+
+saltQ$CBQ040<- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+saltQ$test <- "Overall(N = 11, 638)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(saltQ, aes(x=CBQ040, y = FREQ)) + geom_bar(stat="identity" , fill = "blue")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How often do you have salty snacks(chips/crackers) \n in your home?(Total) N= 11,638", x = "Rating(1-7)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+teachsaltQ$CBQ040<- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+teachsaltQ$test <- "Teachers(N = 275)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(teachsaltQ, aes(x=CBQ040, y = FREQ)) + geom_bar(stat="identity" , fill = "blue")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How often do you have salty snacks(chips/crackers) \n in your home?(Total) N= 275", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+graphCombine3 <- rbind(saltQ, teachsaltQ)
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(graphCombine3, aes(factor(CBQ040), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge", colour = "black") +labs(title = "How often do you have salty snacks(chips/crackers) \n in your home?", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_brewer(palette='Set2')
+
+
+
+
+
+
+
+
+
+
+
+
+softQ$CBQ060<- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+softQ$test <- "Overall(N = 11, 638)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(softQ, aes(x=CBQ060, y = FREQ)) + geom_bar(stat="identity" , fill = "purple")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How often do you have soft drinks \n in your home?(Total) N= 11,638", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+teachsoftQ$CBQ060<- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+teachsoftQ$test <- "Teachers(N = 275)"
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(teachsoftQ, aes(x=CBQ060, y = FREQ)) + geom_bar(stat="identity" , fill = "purple")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How often do you have soft drinks \n in your home?(Total) N= 275", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+
+graphCombine2 <- rbind(softQ, teachsoftQ)
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(graphCombine2, aes(factor(CBQ060), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge", colour = "black") +labs(title = "How often do you have soft drinks \n in your home?", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=3, name="GrandBudapest"))
+
+
+
+
+
+
+
+
+
+DBQ$DBQ700<- c("Excellent","Very good", "Good", "Fair", "Poor")
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+DBQ$test <- "Overall(N= 11,672)"
+ggplot(DBQ, aes(x=DBQ700, y = FREQ)) + geom_bar(stat="identity" , fill = "sky blue")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How healthy is your diet? N= 11,762", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+teachDBQ$DBQ700<- c("Excellent","Very good", "Good", "Fair", "Poor")
+teachDBQ$test <- "Teachers(N=244)"
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(teachDBQ, aes(x=DBQ700, y = FREQ)) + geom_bar(stat="identity" , fill = "sky blue")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How healthy is your diet? N= 244", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+
+
+graphCombine <- rbind(DBQ, teachDBQ)
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(graphCombine, aes(factor(DBQ700), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge", colour = "black") +labs(title = "How healthy is your diet?", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=3, name="Darjeeling"))
+
+####BUILD HTT DATASET 
+
+DBQ700 = c("Excellent","Very good", "Good", "Fair", "Poor" ,"Excellent","Very good", "Good", "Fair", "Poor")
+FREQ = c(9.3 , 30.7 , 47.1 , 12.1 , 0.7 , 4.4 ,29.6 ,54.7 , 9.9 , 1.5)
+test = c("HTT Before", "HTT Before", "HTT Before", "HTT Before", "HTT Before" , "HTT After" , "HTT After" , "HTT After" , "HTT After" , "HTT After")
+df2 = data.frame(DBQ700, test, FREQ) 
+df2$se <- NA
+df2$weightedTotal <- NA 
+
+
+newDB2 <- rbind(df2, graphCombine)
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(newDB2, aes(factor(DBQ700), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge", colour = "black") +labs(title = "How healthy is your diet?", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Chevalier"))
+
+
+
+
+
+
+
+genHealth$HSD010<- c("Excellent","Very good", "Good", "Fair", "Poor")
+genHealth$test<- 'Overall(N= 10,595)'
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(genHealth, aes(x=HSD010, y = FREQ)) + geom_bar(stat="identity" , fill = "pink")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How would you rate your overall health? N= 10,595", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+teachGenHealth$HSD010<- c("Excellent","Very good", "Good", "Fair", "Poor")
+teachGenHealth$test <- "Teachers(N=250)" 
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(teachGenHealth, aes(x=HSD010, y = FREQ)) + geom_bar(stat="identity" , fill = "pink")+
+  geom_text(aes(label = sprintf("%.2f%%", FREQ)), vjust = -.5)+ labs(title = "How would you rate your overall health? N= 250", y = "PCT")+ scale_x_discrete(limits = positions)
+
+testr <- rbind(genHealth, teachGenHealth)
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(testr, aes(factor(HSD010), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge" , colour = "black") +labs(title = "How would you rate your overall health? ", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=3, name="Moonrise2"))
+
+####BUILD HTT DATASET 
+
+HSD010 = c("Excellent","Very good", "Good", "Fair", "Poor" ,"Excellent","Very good", "Good", "Fair", "Poor")
+FREQ = c(9.4 , 43.5 , 39.5 , 5.8 , 0.5 , 9.8, 41.7, 44.0 , 4.5 , 0 )
+test = c("HTT Before", "HTT Before", "HTT Before", "HTT Before", "HTT Before" , "HTT After" , "HTT After" , "HTT After" , "HTT After" , "HTT After")
+df = data.frame(HSD010, test, FREQ) 
+df$se <- NA
+df$weightedTotal <- NA 
+
+newDB <- rbind(df , testr)
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(newDB, aes(factor(HSD010), FREQ, fill = test)) + 
+  geom_bar(stat="identity", position = "dodge" , colour = "black" ) +labs(title = "How would you rate your overall health? ", y = "PCT")+ scale_x_discrete(limits = positions) + geom_text(aes(label=round(FREQ , 2)), position=position_dodge(width=0.9), vjust=-0.25) + scale_fill_manual(values=wes_palette(n=4, name="Moonrise2"))
+
+
+````
+
+
+
+NEED TO STACK BARPLOTS, FINISH LAB DATA , TYPE UP METHODS. 

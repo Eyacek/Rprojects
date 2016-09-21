@@ -1,0 +1,382 @@
+---
+title: "Teacher Descriptive Stats"
+author: "Evan Yacek"
+date: "Tuesday, July 12, 2016"
+output: html_document
+---
+
+```{r global_options, include=FALSE}
+library(knitr)
+opts_chunk$set(fig.align="center", fig.height=6, fig.width=6)
+library(ggplot2)
+theme_set(theme_bw(base_size=12))
+library(tidyr)
+library(plyr)
+library(dplyr)
+library(nhanesA)
+```
+
+
+```{r, echo=FALSE , include=FALSE}
+
+
+OCP_E2007 <- nhanes('OCQ_E')
+OCP_F2009 <- nhanes('OCQ_F')
+DEMO2007 <- nhanes('DEMO_E')
+DEMO2009 <- nhanes('DEMO_F')
+Diet2007 <- nhanes('DBQ_E')
+Diet2009 <- nhanes('DBQ_F')
+cons2007 <- nhanes('CBQ_E')
+cons2009 <- nhanes('CBQ_F')
+bodyMeasure2007 <- nhanes('BMX_E')
+bodyMeasure2009 <- nhanes('BMX_F')
+bp2007 <- nhanes('BPX_E')
+bp2009 <- nhanes('BPX_F')
+chol2007 <- nhanes('HDL_E')
+chol2009 <- nhanes('HDL_F')
+tri2007 <- nhanes('TRIGLY_E')
+tri2009 <- nhanes('TRIGLY_F')
+apob2007 <-nhanes('APOB_E')
+apob2009 <-nhanes('APOB_F')
+
+#FILTER BASED ON TEACHER OCCUPATION CODES
+TEACHERS2007 <- filter(OCP_E2007, OCD231 == 15 & OCD241 == 8 )
+TEACHERS2009 <- filter(OCP_F2009, OCD231 == 15 & OCD241 == 8 )
+
+#MERGE INTO SINGLE TEACHER DATASET
+TEACHERDEMO2007 <- merge(TEACHERS2007 , DEMO2007) 
+td <- merge(TEACHERDEMO2007 , Diet2007)
+td <- merge(td , cons2007)
+td <- merge(td, bp2007)
+td <- merge(td, bodyMeasure2007)
+td <- merge(td, chol2007)
+
+
+
+TEACHERDEMO2009 <- merge(TEACHERS2009 , DEMO2009)
+td2 <- merge(TEACHERDEMO2009 , Diet2009)
+td2 <- merge(td2, cons2009)
+td2 <- merge(td2, bp2009)
+td2 <- merge(td2, bodyMeasure2009)
+td2 <- merge(td2, chol2009)
+
+
+
+common_cols <- intersect(colnames(td), colnames(td2))
+newCombine<- 
+  rbind(
+  subset(td, select = common_cols), 
+  subset(td2, select = common_cols)
+)
+
+
+
+#CREATE FREQUENCY TABLE FOR GENDER
+MF_Frequency <- table(newCombine$RIAGENDR)  
+res <- cbind(MF_Frequency,round(prop.table(MF_Frequency)*100, 2))
+rownames(res) <- c('Male','Female')
+colnames(res) <- c("Freq", "Pct")
+
+```
+### Teacher's Gender Distribution Frequency Table(N= 279)
+```{r, echo = FALSE}
+res
+```
+### Intervaled Age Distribution For Teachers(N = 279)
+```{r, echo= FALSE}
+
+#INTERVALED AGE DISTRIBUTION FOR TEACHERS
+
+x <- newCombine$RIDAGEYR
+factorx <- factor(cut(x, breaks=8))
+#Tabulate and turn into data.frame
+xout <- as.data.frame(table(factorx))
+#Add cumFreq and proportions
+xout <- transform(xout, cumFreq = cumsum(Freq), relative = prop.table(Freq)*100)
+colnames(xout) <- c("Age-Range" , "Freq" , "Total", "PCT")
+xout
+ggplot(newCombine, aes(x = RIDAGEYR, fill=..count.. )) + geom_histogram(bins = 8, col="black" ) + labs(title="Distribution for Age of Teachers") + labs(x="Age", y="Count") + scale_fill_gradient("Count", low = "green", high = "red")
+
+ageDataset2007 <- merge(DEMO2007, cons2007)
+ageDataset2007 <- merge(ageDataset2007, Diet2007 )
+ageDataset2009 <- merge(DEMO2009, cons2009)
+ageDataset2009 <- merge(ageDataset2009, Diet2009)
+common_cols5 <- intersect(colnames(ageDataset2007), colnames(ageDataset2009))
+ageDataset<- 
+  rbind(
+  subset(ageDataset2007, select = common_cols5), 
+  subset(ageDataset2009, select = common_cols5)
+)
+ageDataset <- filter(ageDataset, RIDAGEYR >= 16 & RIDAGEYR <= 80 )
+```
+### Intervaled (16 < Age < 90) Distribution for NHANES(07-10) N = 13435
+```{r, echo=FALSE}
+y <- ageDataset$RIDAGEYR
+factory <- factor(cut(y, breaks=8))
+#Tabulate and turn into data.frame
+yout <- as.data.frame(table(factory))
+#Add cumFreq and proportions
+yout <- transform(yout, cumFreq = cumsum(Freq), relative = prop.table(Freq)*100)
+colnames(yout) <- c("Age-Range" , "Freq" , "Total", "PCT")
+yout
+ggplot(ageDataset, aes(x = RIDAGEYR, fill=..count.. )) + geom_histogram(bins = 8, col="black" ) + labs(title="Distribution for Age of Population NHANES(07-10) N = 13435") + labs(x="Age", y="Count") + scale_fill_gradient("Count", low = "green", high = "red")
+```
+### Teacher Ethnicity Distribution
+
+```{r, echo=FALSE}
+#Ethnicity Distribution
+Ethnic_Frequency <- table(newCombine$RIDRETH1)  
+rest <- cbind(Ethnic_Frequency,round(prop.table(Ethnic_Frequency)*100, 2))
+colnames(rest) <- c("Freq", "Pct")
+rownames(rest) <- c("Mexican American", "Other Hispanic", "Non-Hispanic White", "Non-Hispanic Black", "Other")
+rest
+
+```
+
+
+### Male Teachers mean waist circumference N= 79
+
+```{r , echo = FALSE}
+
+#Calculate mean Waist Cirucumference 
+#Seperate Men and Women
+maleTeachers <- filter(newCombine,RIAGENDR == 1 )
+femTeachers <- filter(newCombine,RIAGENDR == 2 )
+maleTeacherWaistMean <- mean(maleTeachers$BMXWAIST, na.rm = TRUE)
+
+#Average
+maleTeacherWaistMean
+```
+### Female mean waist circumference N = 200
+```{r, echo= FALSE}
+femTeacherWaistMean <- mean(femTeachers$BMXWAIST, na.rm = TRUE)
+femTeacherWaistMean
+totalPop <- rbind(DEMO2007, DEMO2009)
+totalPop2 <- rbind(bodyMeasure2007, bodyMeasure2009)
+totalPopset <- merge(totalPop, totalPop2)
+totalPopset <- filter(totalPopset, RIDAGEYR >= 16 & RIDAGEYR <= 80 )
+totalPopMale <- filter(totalPopset, RIAGENDR == 1)
+totalPopFemale <- filter(totalPopset, RIAGENDR == 2)
+femPopMeanWaist <- mean(totalPopFemale$BMXWAIST, na.rm = TRUE)
+malePopMeanWaist <- mean(totalPopMale$BMXWAIST, na.rm = TRUE)
+```
+### Female NHANES(07-10) mean waist circumference N = 6618
+```{r, echo=FALSE}
+femPopMeanWaist
+```
+
+### Male NHANES(07-10) mean waist circumference N = 6406
+```{r,echo = FALSE}
+malePopMeanWaist
+
+
+
+```
+
+### Mean triglyceride levels for Male Teachers N= 42
+
+
+```{r , echo=FALSE}
+
+teacherTri2007 <- filter(OCP_E2007, OCD231 == 15 & OCD241 == 8 )
+teacherTri2007 <- merge(teacherTri2007, tri2007 )
+teacherTri2007 <- merge(teacherTri2007, DEMO2007 )
+teacherTri2009 <- filter(OCP_F2009, OCD231 == 15 & OCD241 == 8 )
+teacherTri2009 <- merge(teacherTri2009, tri2009 )
+teacherTri2009 <- merge(teacherTri2009, DEMO2009 )
+
+common_cols2 <- intersect(colnames(teacherTri2007), colnames(teacherTri2009))
+newCombine2<- 
+  rbind(
+  subset(teacherTri2007, select = common_cols2), 
+  subset(teacherTri2009, select = common_cols2)
+)
+
+
+maleTeachTri <- filter(newCombine2 ,RIAGENDR == 1 )
+maleTeachTriMean <- mean(maleTeachTri$LBXTR, na.rm = TRUE)
+maleTeachTriMean
+```
+
+### Mean triglyceride levels for Female Teachers N= 87
+
+```{r, echo = FALSE}
+femaleTeachTri <- filter(newCombine2 ,RIAGENDR == 2 )
+femaleTeachTriMean <- mean(femaleTeachTri$LBXTR, na.rm = TRUE)
+femaleTeachTriMean
+```
+
+```{r, echo=FALSE}
+
+totalPop3 <- rbind(DEMO2007, DEMO2009)
+totalPop4 <- rbind(tri2007, tri2009)
+totalPopset2 <- merge(totalPop3, totalPop4)
+totalPopset2 <- filter(totalPopset2, RIDAGEYR >= 16 & RIDAGEYR <= 80 )
+totalPopMale2 <- filter(totalPopset2, RIAGENDR == 1)
+totalPopFemale2 <- filter(totalPopset2, RIAGENDR == 2)
+```
+### Mean Triglyceride for NHANES Female pop. N = 3502
+```{r, echo=FALSE}
+femPopMeanTri <- mean(totalPopFemale2$LBXTR, na.rm = TRUE)
+femPopMeanTri
+```
+### Mean Triglyceride for NHANES Male pop. N = 3394
+```{r, echo = FALSE}
+malePopMeanTri <- mean(totalPopMale2$LBXTR, na.rm = TRUE)
+malePopMeanTri
+
+```
+
+### Mean HDL for Male Teachers N = 79
+
+```{r, echo = FALSE}
+
+teacherHDL2007 <- filter(OCP_E2007, OCD231 == 15 & OCD241 == 8 )
+teacherHDL2007 <- merge(teacherHDL2007, chol2007 )
+teacherHDL2007 <- merge(teacherHDL2007, DEMO2007 )
+teacherHDL2009 <- filter(OCP_F2009, OCD231 == 15 & OCD241 == 8 )
+teacherHDL2009 <- merge(teacherHDL2009, chol2009 )
+teacherHDL2009 <- merge(teacherHDL2009, DEMO2009 )
+
+common_cols3 <- intersect(colnames(teacherHDL2007), colnames(teacherHDL2009))
+newCombine3<- 
+  rbind(
+  subset(teacherHDL2007, select = common_cols3), 
+  subset(teacherHDL2009, select = common_cols3)
+)
+
+
+maleTeachHDL <- filter(newCombine3 ,RIAGENDR == 1 )
+maleTeachHDLMean <- mean(maleTeachHDL$LBDHDD, na.rm = TRUE)
+maleTeachHDLMean
+```
+
+### Mean HDL for Female Teachers N = 200
+```{r, echo= FALSE}
+
+femaleTeachHDL <- filter(newCombine3 ,RIAGENDR == 2 )
+femaleTeachHDLMean <- mean(femaleTeachHDL$LBDHDD, na.rm = TRUE)
+femaleTeachHDLMean
+
+
+```
+
+### Mean HDL for Female NHANES Pop. N = 6618
+```{r, echo = FALSE}
+ageHDL <- rbind(chol2007, chol2009)
+ageHDL2 <- rbind(DEMO2007, DEMO2009)
+ageHDL3 <- merge(ageHDL, ageHDL2)
+ageHDL3 <- filter(ageHDL3, RIDAGEYR >= 16 & RIDAGEYR <= 80 )
+femAgeHDL <- filter( ageHDL3, RIAGENDR == 2 )
+maleAgeHDL <- filter( ageHDL3, RIAGENDR == 1 )
+femAgeMean <- mean(femAgeHDL$LBDHDD, na.rm = TRUE)
+femAgeMean
+```
+
+### Mean HDL for Male NHANES Pop. N = 6406
+
+```{r, echo=FALSE}
+maleAgeMean <- mean( maleAgeHDL$LBDHDD , na.rm = TRUE)
+maleAgeMean
+```
+
+```{r , echo= FALSE}
+
+TEACHERS2007 <- merge(TEACHERS2007, Diet2007)
+TEACHERS2009 <- merge(TEACHERS2009, Diet2009)
+commoncols <- intersect(colnames(TEACHERS2007), colnames(TEACHERS2009))
+teacherCombine<- 
+  rbind(
+    subset(TEACHERS2007, select = commoncols), 
+    subset(TEACHERS2009, select = commoncols)
+  )
+
+healthyDietQ <- as.data.frame(table(teacherCombine$DBQ700))
+healthyDietQ$Var1 <- c("Excellent","Very good", "Good", "Fair", "Poor")
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(healthyDietQ, aes(x=Var1, y = Freq*100/288)) + geom_bar(stat="identity" , fill = "sky blue")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How healthy is your diet?(Total) N= 288", x = "Rating(1-5)", y = "PCT") + scale_x_discrete(limits = positions)
+  
+healthyDietQ2007 <- as.data.frame(table(TEACHERS2007$DBQ700))
+healthyDietQ2007$Var1 <- c("Excellent","Very good", "Good", "Fair", "Poor")
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor")
+ggplot(healthyDietQ2007, aes(x=Var1, y = Freq*100/144)) + geom_bar(stat="identity" , fill = "sky blue")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How healthy is your diet?(2007-08) N= 144", x = "Rating(1-5)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+healthyDietQ2009 <- as.data.frame(table(TEACHERS2009$DBQ700))
+healthyDietQ2009$Var1 <- c("Excellent","Very good", "Good", "Fair" )
+positions <- c("Excellent","Very good", "Good", "Fair" )
+ggplot(healthyDietQ2009, aes(x=Var1, y = Freq*100/144)) + geom_bar(stat="identity" , fill = "sky blue")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How healthy is your diet?(2009-10) N= 144", x = "Rating(1-5)", y = "PCT") +  scale_x_discrete(limits = positions)
+
+
+healthyDietQPOP<- as.data.frame(table(ageDataset$DBQ700))
+healthyDietQPOP$Var1 <- c("Excellent","Very good", "Good", "Fair", "Poor" ,"IDK", "NA")
+positions <- c("Excellent","Very good", "Good", "Fair", "Poor" ,"IDK", "NA")
+ggplot(healthyDietQPOP, aes(x=Var1, y = Freq*100/144)) + geom_bar(stat="identity" , fill = "sky blue")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How healthy is your diet? N= 13,435", x = "Rating(1-7)", y = "PCT") + scale_x_discrete(limits = positions)
+
+TEACHERS2007 <- merge(TEACHERS2007, cons2007)
+TEACHERS2009 <- merge(TEACHERS2009, cons2009)
+commoncols <- intersect(colnames(TEACHERS2007), colnames(TEACHERS2009))
+teacherCombine<- 
+  rbind(
+    subset(TEACHERS2007, select = commoncols), 
+    subset(TEACHERS2009, select = commoncols)
+  )
+
+fruitsQ <- as.data.frame(table(teacherCombine$CBQ020))
+fruitsQ$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely")
+ggplot(fruitsQ, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "red")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have fruits \n in your home?(Total) N= 287", x = "Rating(1-7)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+fruitsQPOP <- as.data.frame(table(ageDataset$CBQ020))
+fruitsQPOP$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+ggplot(fruitsQPOP, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "red")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have fruits \n in your home?(Total) N= 13,435", x = "Rating(1-7)", y = "PCT")  + scale_x_discrete(limits = positions)
+
+vegQ <- as.data.frame(table(teacherCombine$CBQ030))
+vegQ$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never")
+ggplot(vegQ, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "dark green")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have dark green vegetables \n in your home?(Total) N= 287", x = "Rating(1-7)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+vegQPOP <- as.data.frame(table(ageDataset$CBQ030))
+vegQPOP$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+ggplot(vegQPOP, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "dark green")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have dark green vegetables \n in your home?(Total) N= 13,435", x = "Rating(1-7)", y = "PCT")  + scale_x_discrete(limits = positions)
+
+saltQ <- as.data.frame(table(teacherCombine$CBQ040))
+saltQ$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never", "IDK")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never", "IDK")
+ggplot(saltQ, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "blue")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have salty snacks(chips/crackers) \n in your home?(Total) N= 287", x = "Rating(1-7)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+saltQPOP <- as.data.frame(table(ageDataset$CBQ040))
+saltQPOP$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+ggplot(saltQPOP, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "blue")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have Salty Snacks \n in your home?(Total) N= 13,435", x = "Rating(1-7)", y = "PCT")  + scale_x_discrete(limits = positions)
+
+
+
+softQ <- as.data.frame(table(teacherCombine$CBQ060))
+softQ$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never", "IDK")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" , "Never", "IDK")
+ggplot(softQ, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "purple")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have soft drinks \n available in your home?(Total) N= 287", x = "Rating(1-7)", y = "PCT")+ scale_x_discrete(limits = positions)
+
+
+softQPOP <- as.data.frame(table(ageDataset$CBQ060))
+softQPOP$Var1 <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+positions <- c("Always","Most of the \n Time", "Sometimes", "Rarely" ,"Never", "IDK" , "NA")
+ggplot(softQPOP, aes(x=Var1, y = Freq*100/287)) + geom_bar(stat="identity" , fill = "purple")+
+  geom_text(aes(label = sprintf("%.2f%%", Freq/sum(Freq) * 100)), vjust = -.5)+ labs(title = "How often do you have Soft Drinks \n in your home?(Total) N= 13,435", x = "Rating(1-7)", y = "PCT")  + scale_x_discrete(limits = positions)
+```
+
+
+
+
